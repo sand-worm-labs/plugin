@@ -56,3 +56,7 @@ cypress/screenshots/
 cypress/downloads/
 
 
+/.eliza
+/.elizadb
+dist
+bun.lock
