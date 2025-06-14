@@ -5,50 +5,37 @@ import {
     IAgentRuntime,
     Memory,
     ModelClass,
-    ServiceType,
     State,
+    ServiceType,
     composeContext,
     elizaLogger,
     generateObject,
     type Action,
 } from "@elizaos/core";
-import { NaviService } from "../services/navi";
+
 import { z } from "zod";
 
-export interface LendPayload extends Content {
-    operation: "supply" | "withdraw" | "borrow" | "repay";
-    token_symbol: string;
-    amount: string | number;
+export interface SandwormQueryPayload extends Content {
+    query: string;
 }
 
-const lendTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
-
-Example response:
-\`\`\`json
-{
-    "operation": "supply",
-    "token_symbol": "sui",
-    "amount": "1"
-}
-\`\`\`
+const queryTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null if you can't extract the query.
 
 {{recentMessages}}
 
-Given the recent messages, extract the following information about the lending operation:
-- Operation type (supply, withdraw, borrow, or repay)
-- Token symbol
-- Amount to supply/withdraw/borrow/repay
+Given the recent messages, extract the raw SQL or pseudo-SQL query the user wants to run on the Sandworm analytics engine.
 
-Respond with a JSON markdown block containing only the extracted values.`;
+Respond with:
+\`\`\`json
+{
+  "query": "SELECT * FROM swaps WHERE token_symbol = 'SUI' AND timestamp >= NOW() - INTERVAL '1 day'"
+}
+\`\`\``;
 
 export default {
-    name: "NAVI_LEND",
-    similes: ["NAVI_SUPPLY", "NAVI_WITHDRAW", "NAVI_BORROW", "NAVI_REPAY"],
-    validate: async (runtime: IAgentRuntime, message: Memory) => {
-        console.log("Validating navi lending operation from user:", message.userId);
-        return true;
-    },
-    description: "Supply, withdraw, borrow, or repay tokens from Navi protocol",
+    name: "SANDWORM_QUERY",
+    description: "Run analytics queries against Sandworm data engine",
+    validate: async (_runtime, _message) => true,
     handler: async (
         runtime: IAgentRuntime,
         message: Memory,
@@ -56,82 +43,48 @@ export default {
         _options: { [key: string]: unknown },
         callback?: HandlerCallback
     ): Promise<boolean> => {
-        elizaLogger.log("Starting NAVI_LEND handler...");
+        elizaLogger.log("SANDWORM_QUERY handler started");
 
-        const service = runtime.getService<NaviService>(ServiceType.TRANSCRIPTION);
-
-        if (!state) {
-            state = (await runtime.composeState(message)) as State;
-        } else {
-            state = await runtime.updateRecentMessageState(state);
-        }
-
-        const lendSchema = z.object({
-            operation: z.enum(["supply", "withdraw", "borrow", "repay"]),
-            token_symbol: z.string(),
-            amount: z.union([z.string(), z.number()]),
+        const schema = z.object({
+            query: z.string(),
         });
 
-        const lendContext = composeContext({
-            state,
-            template: lendTemplate,
+        const ctx = composeContext({
+            state: await runtime.composeState(message),
+            template: queryTemplate,
         });
 
         const content = await generateObject({
             runtime,
-            context: lendContext,
-            schema: lendSchema,
+            context: ctx,
+            schema,
             modelClass: ModelClass.SMALL,
         });
 
-        const lendContent = content.object as LendPayload;
-        elizaLogger.info("Lend content:", lendContent);
+        const queryPayload = content.object as SandwormQueryPayload;
+        elizaLogger.info("User query extracted:", queryPayload.query);
 
         try {
-            // Get token metadata
-            const tokenInfo = {
-                symbol: lendContent.token_symbol.toUpperCase(),
-                address: "", // This will be filled by the SDK
-                decimal: 9,
-            };
+            // Send query to your Sandworm backend
+            const response = await fetch("https://your-sandworm-api/query", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: queryPayload.query }),
+            });
 
-            // Get health factor before operation
-            const healthFactor = await service.getHealthFactor(service.getAddress());
-            elizaLogger.info("Current health factor:", healthFactor);
+            const result = await response.json();
 
-            // Get dynamic health factor for the operation
-            const dynamicHealthFactor = await service.getDynamicHealthFactor(
-                service.getAddress(),
-                tokenInfo,
-                lendContent.operation === "supply" ? Number(lendContent.amount) : 0,
-                lendContent.operation === "borrow" ? Number(lendContent.amount) : 0,
-                lendContent.operation === "supply" || lendContent.operation === "borrow"
-            );
-            elizaLogger.info("Dynamic health factor:", dynamicHealthFactor);
-
-            // Execute the operation
-            const result = await service.executeOperation(
-                lendContent.operation,
-                lendContent.token_symbol,
-                lendContent.amount
-            );
-
-            callback({
-                text: `Successfully executed ${lendContent.operation} operation:
-                - Token: ${lendContent.token_symbol}
-                - Amount: ${lendContent.amount}
-                - Current Health Factor: ${healthFactor}
-                - Projected Health Factor: ${dynamicHealthFactor}
-                - Transaction: ${JSON.stringify(result)}`,
-                content: lendContent,
+            callback?.({
+                text: `Query executed successfully:\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``,
+                content: queryPayload,
             });
 
             return true;
-        } catch (error) {
-            elizaLogger.error("Error in lending operation:", error);
-            callback({
-                text: `Failed to perform ${lendContent.operation} operation: ${error}`,
-                content: { error: `Failed to ${lendContent.operation}` },
+        } catch (err) {
+            elizaLogger.error("Query failed:", err);
+            callback?.({
+                text: `Failed to execute query: ${err}`,
+                content: { error: err },
             });
             return false;
         }
@@ -142,85 +95,22 @@ export default {
             {
                 user: "{{user1}}",
                 content: {
-                    text: "I want to supply 1 SUI to Navi",
+                    text: "Show me the top 5 pools on Base by volume this week",
                 },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "I'll help you supply 1 SUI to Navi protocol...",
-                    action: "NAVI_LEND",
+                    text: "Running your query...",
+                    action: "SANDWORM_QUERY",
                 },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "Successfully supplied 1 SUI to Navi protocol",
+                    text: "Here are the top 5 pools on Base by volume this week:\n\n```json\n[...results...]\n```",
                 },
             },
         ],
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "Withdraw 0.5 SUI from Navi",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "I'll help you withdraw 0.5 SUI from Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully withdrew 0.5 SUI from Navi protocol",
-                },
-            },
-        ],
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "Borrow 100 USDC from Navi",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "I'll help you borrow 100 USDC from Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully borrowed 100 USDC from Navi protocol",
-                },
-            },
-        ],
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "Repay 50 USDC to Navi",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "I'll help you repay 50 USDC to Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully repaid 50 USDC to Navi protocol",
-                },
-            },
-        ],
-    ] as ActionExample[][],
-} as Action; 
+    ] as unknown as ActionExample[][],
+} as Action;

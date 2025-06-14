@@ -5,7 +5,6 @@ import {
     IAgentRuntime,
     Memory,
     ModelClass,
-    ServiceType,
     State,
     composeContext,
     elizaLogger,
@@ -15,40 +14,36 @@ import {
 import { NaviService } from "../services/navi";
 import { z } from "zod";
 
-export interface LendPayload extends Content {
-    operation: "supply" | "withdraw" | "borrow" | "repay";
-    token_symbol: string;
-    amount: string | number;
+export interface ChartPayload extends Content {
+    chart_type: "supply" | "borrow" | "health_factor";
+    token_symbol?: string;
 }
 
-const lendTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
+const chartTemplate = `Extract the user's intent to generate a chart and which type.
 
-Example response:
+Valid chart types:
+- "supply": user's supply history
+- "borrow": user's borrow history
+- "health_factor": user's health factor trend
+
+Return a JSON markdown block like this:
+
 \`\`\`json
 {
-    "operation": "supply",
-    "token_symbol": "sui",
-    "amount": "1"
+  "chart_type": "supply",
+  "token_symbol": "SUI"
 }
 \`\`\`
 
-{{recentMessages}}
+If token is not mentioned, use null.
 
-Given the recent messages, extract the following information about the lending operation:
-- Operation type (supply, withdraw, borrow, or repay)
-- Token symbol
-- Amount to supply/withdraw/borrow/repay
-
-Respond with a JSON markdown block containing only the extracted values.`;
+{{recentMessages}}`;
 
 export default {
-    name: "NAVI_LEND",
-    similes: ["NAVI_SUPPLY", "NAVI_WITHDRAW", "NAVI_BORROW", "NAVI_REPAY"],
-    validate: async (runtime: IAgentRuntime, message: Memory) => {
-        console.log("Validating navi lending operation from user:", message.userId);
-        return true;
-    },
-    description: "Supply, withdraw, borrow, or repay tokens from Navi protocol",
+    name: "GENERATE_CHART",
+    description: "Visualize lending data like supply, borrow, or health factor as charts",
+    validate: async (_runtime: IAgentRuntime, _message: Memory) => true,
+
     handler: async (
         runtime: IAgentRuntime,
         message: Memory,
@@ -56,7 +51,7 @@ export default {
         _options: { [key: string]: unknown },
         callback?: HandlerCallback
     ): Promise<boolean> => {
-        elizaLogger.log("Starting NAVI_LEND handler...");
+        elizaLogger.log("Starting GENERATE_CHART handler...");
 
         const service = runtime.getService<NaviService>(ServiceType.TRANSCRIPTION);
 
@@ -66,72 +61,58 @@ export default {
             state = await runtime.updateRecentMessageState(state);
         }
 
-        const lendSchema = z.object({
-            operation: z.enum(["supply", "withdraw", "borrow", "repay"]),
-            token_symbol: z.string(),
-            amount: z.union([z.string(), z.number()]),
+        const chartSchema = z.object({
+            chart_type: z.enum(["supply", "borrow", "health_factor"]),
+            token_symbol: z.string().optional().nullable(),
         });
 
-        const lendContext = composeContext({
+        const chartContext = composeContext({
             state,
-            template: lendTemplate,
+            template: chartTemplate,
         });
 
         const content = await generateObject({
             runtime,
-            context: lendContext,
-            schema: lendSchema,
+            context: chartContext,
+            schema: chartSchema,
             modelClass: ModelClass.SMALL,
         });
 
-        const lendContent = content.object as LendPayload;
-        elizaLogger.info("Lend content:", lendContent);
+        const chartPayload = content.object as ChartPayload;
+        elizaLogger.info("Chart payload:", chartPayload);
 
         try {
-            // Get token metadata
-            const tokenInfo = {
-                symbol: lendContent.token_symbol.toUpperCase(),
-                address: "", // This will be filled by the SDK
-                decimal: 9,
-            };
+            const address = service.getAddress();
+            let data;
 
-            // Get health factor before operation
-            const healthFactor = await service.getHealthFactor(service.getAddress());
-            elizaLogger.info("Current health factor:", healthFactor);
+            switch (chartPayload.chart_type) {
+                case "supply":
+                    data = await service.getSupplyHistory(address, chartPayload.token_symbol ?? undefined);
+                    break;
+                case "borrow":
+                    data = await service.getBorrowHistory(address, chartPayload.token_symbol ?? undefined);
+                    break;
+                case "health_factor":
+                    data = await service.getHealthFactorHistory(address);
+                    break;
+            }
 
-            // Get dynamic health factor for the operation
-            const dynamicHealthFactor = await service.getDynamicHealthFactor(
-                service.getAddress(),
-                tokenInfo,
-                lendContent.operation === "supply" ? Number(lendContent.amount) : 0,
-                lendContent.operation === "borrow" ? Number(lendContent.amount) : 0,
-                lendContent.operation === "supply" || lendContent.operation === "borrow"
-            );
-            elizaLogger.info("Dynamic health factor:", dynamicHealthFactor);
-
-            // Execute the operation
-            const result = await service.executeOperation(
-                lendContent.operation,
-                lendContent.token_symbol,
-                lendContent.amount
-            );
-
-            callback({
-                text: `Successfully executed ${lendContent.operation} operation:
-                - Token: ${lendContent.token_symbol}
-                - Amount: ${lendContent.amount}
-                - Current Health Factor: ${healthFactor}
-                - Projected Health Factor: ${dynamicHealthFactor}
-                - Transaction: ${JSON.stringify(result)}`,
-                content: lendContent,
+            // Return chart data to UI for rendering
+            callback?.({
+                text: `📈 Here's the ${chartPayload.chart_type} chart${chartPayload.token_symbol ? ` for ${chartPayload.token_symbol}` : ""}:`,
+                content: {
+                    chart_type: chartPayload.chart_type,
+                    token_symbol: chartPayload.token_symbol ?? null,
+                    data,
+                },
             });
 
             return true;
-        } catch (error) {
-            elizaLogger.error("Error in lending operation:", error);
-            callback({
-                text: `Failed to perform ${lendContent.operation} operation: ${error}`,
-                content: { error: `Failed to ${lendContent.operation}` },
+        } catch (err) {
+            elizaLogger.error("Chart generation failed:", err);
+            callback?.({
+                text: `Failed to generate ${chartPayload.chart_type} chart.`,
+                content: { error: "Chart generation failed" },
             });
             return false;
         }
@@ -141,86 +122,41 @@ export default {
         [
             {
                 user: "{{user1}}",
-                content: {
-                    text: "I want to supply 1 SUI to Navi",
-                },
+                content: { text: "Show me my SUI supply chart over time." },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "I'll help you supply 1 SUI to Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully supplied 1 SUI to Navi protocol",
+                    text: "📈 Here's the supply chart for SUI:",
+                    action: "GENERATE_CHART",
                 },
             },
         ],
         [
             {
                 user: "{{user1}}",
-                content: {
-                    text: "Withdraw 0.5 SUI from Navi",
-                },
+                content: { text: "Visualize my borrow history on Navi." },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "I'll help you withdraw 0.5 SUI from Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully withdrew 0.5 SUI from Navi protocol",
+                    text: "📉 Here's your borrow chart:",
+                    action: "GENERATE_CHART",
                 },
             },
         ],
         [
             {
                 user: "{{user1}}",
-                content: {
-                    text: "Borrow 100 USDC from Navi",
-                },
+                content: { text: "Plot my health factor trend" },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "I'll help you borrow 100 USDC from Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully borrowed 100 USDC from Navi protocol",
-                },
-            },
-        ],
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "Repay 50 USDC to Navi",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "I'll help you repay 50 USDC to Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully repaid 50 USDC to Navi protocol",
+                    text: "🛡️ Health factor over time:",
+                    action: "GENERATE_CHART",
                 },
             },
         ],
     ] as ActionExample[][],
-} as Action; 
+} as Action;

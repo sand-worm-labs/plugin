@@ -5,7 +5,6 @@ import {
     IAgentRuntime,
     Memory,
     ModelClass,
-    ServiceType,
     State,
     composeContext,
     elizaLogger,
@@ -15,40 +14,39 @@ import {
 import { NaviService } from "../services/navi";
 import { z } from "zod";
 
-export interface LendPayload extends Content {
-    operation: "supply" | "withdraw" | "borrow" | "repay";
-    token_symbol: string;
-    amount: string | number;
+export interface QueryPayload extends Content {
+    query_type: "portfolio" | "health_factor" | "supply_positions" | "borrow_positions";
 }
 
-const lendTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null for any values that cannot be determined.
+const queryTemplate = `Respond with a JSON markdown block containing only the extracted query type.
 
-Example response:
+Valid query types:
+- "portfolio": overall assets and liabilities
+- "health_factor": current health factor
+- "supply_positions": what tokens are being supplied
+- "borrow_positions": what tokens are being borrowed
+
+If unsure, respond with null.
+
+Example:
 \`\`\`json
 {
-    "operation": "supply",
-    "token_symbol": "sui",
-    "amount": "1"
+  "query_type": "health_factor"
 }
 \`\`\`
 
 {{recentMessages}}
 
-Given the recent messages, extract the following information about the lending operation:
-- Operation type (supply, withdraw, borrow, or repay)
-- Token symbol
-- Amount to supply/withdraw/borrow/repay
-
-Respond with a JSON markdown block containing only the extracted values.`;
+What is the user trying to query?`;
 
 export default {
-    name: "NAVI_LEND",
-    similes: ["NAVI_SUPPLY", "NAVI_WITHDRAW", "NAVI_BORROW", "NAVI_REPAY"],
+    name: "GENERATE_QUERY",
+    description: "Query user portfolio, health factor, or lending positions",
     validate: async (runtime: IAgentRuntime, message: Memory) => {
-        console.log("Validating navi lending operation from user:", message.userId);
+        elizaLogger.info("Validating query request...");
         return true;
     },
-    description: "Supply, withdraw, borrow, or repay tokens from Navi protocol",
+
     handler: async (
         runtime: IAgentRuntime,
         message: Memory,
@@ -56,7 +54,7 @@ export default {
         _options: { [key: string]: unknown },
         callback?: HandlerCallback
     ): Promise<boolean> => {
-        elizaLogger.log("Starting NAVI_LEND handler...");
+        elizaLogger.info("Starting GENERATE_QUERY handler...");
 
         const service = runtime.getService<NaviService>(ServiceType.TRANSCRIPTION);
 
@@ -66,72 +64,73 @@ export default {
             state = await runtime.updateRecentMessageState(state);
         }
 
-        const lendSchema = z.object({
-            operation: z.enum(["supply", "withdraw", "borrow", "repay"]),
-            token_symbol: z.string(),
-            amount: z.union([z.string(), z.number()]),
+        const querySchema = z.object({
+            query_type: z.enum([
+                "portfolio",
+                "health_factor",
+                "supply_positions",
+                "borrow_positions",
+            ]).nullable(),
         });
 
-        const lendContext = composeContext({
+        const queryContext = composeContext({
             state,
-            template: lendTemplate,
+            template: queryTemplate,
         });
 
         const content = await generateObject({
             runtime,
-            context: lendContext,
-            schema: lendSchema,
+            context: queryContext,
+            schema: querySchema,
             modelClass: ModelClass.SMALL,
         });
 
-        const lendContent = content.object as LendPayload;
-        elizaLogger.info("Lend content:", lendContent);
+        const queryContent = content.object as QueryPayload;
+        elizaLogger.info("Query content extracted:", queryContent);
+
+        if (!queryContent.query_type) {
+            callback?.({
+                text: "Sorry, I couldn't understand your query. Please ask about your portfolio, health factor, or token positions.",
+                content: { error: "Unknown query type" },
+            });
+            return false;
+        }
 
         try {
-            // Get token metadata
-            const tokenInfo = {
-                symbol: lendContent.token_symbol.toUpperCase(),
-                address: "", // This will be filled by the SDK
-                decimal: 9,
-            };
+            const address = service.getAddress();
+            let responseText = "";
+            let result;
 
-            // Get health factor before operation
-            const healthFactor = await service.getHealthFactor(service.getAddress());
-            elizaLogger.info("Current health factor:", healthFactor);
+            switch (queryContent.query_type) {
+                case "portfolio":
+                    result = await service.getPortfolio(address);
+                    responseText = `📊 Your portfolio summary:\n${JSON.stringify(result, null, 2)}`;
+                    break;
+                case "health_factor":
+                    result = await service.getHealthFactor(address);
+                    responseText = `🛡️ Your current health factor is **${result}**.`;
+                    break;
+                case "supply_positions":
+                    result = await service.getSupplyPositions(address);
+                    responseText = `💰 You are supplying:\n${JSON.stringify(result, null, 2)}`;
+                    break;
+                case "borrow_positions":
+                    result = await service.getBorrowPositions(address);
+                    responseText = `💸 You have borrowed:\n${JSON.stringify(result, null, 2)}`;
+                    break;
+            }
 
-            // Get dynamic health factor for the operation
-            const dynamicHealthFactor = await service.getDynamicHealthFactor(
-                service.getAddress(),
-                tokenInfo,
-                lendContent.operation === "supply" ? Number(lendContent.amount) : 0,
-                lendContent.operation === "borrow" ? Number(lendContent.amount) : 0,
-                lendContent.operation === "supply" || lendContent.operation === "borrow"
-            );
-            elizaLogger.info("Dynamic health factor:", dynamicHealthFactor);
-
-            // Execute the operation
-            const result = await service.executeOperation(
-                lendContent.operation,
-                lendContent.token_symbol,
-                lendContent.amount
-            );
-
-            callback({
-                text: `Successfully executed ${lendContent.operation} operation:
-                - Token: ${lendContent.token_symbol}
-                - Amount: ${lendContent.amount}
-                - Current Health Factor: ${healthFactor}
-                - Projected Health Factor: ${dynamicHealthFactor}
-                - Transaction: ${JSON.stringify(result)}`,
-                content: lendContent,
+            callback?.({
+                text: responseText,
+                content: { query: queryContent.query_type, result },
             });
 
             return true;
         } catch (error) {
-            elizaLogger.error("Error in lending operation:", error);
-            callback({
-                text: `Failed to perform ${lendContent.operation} operation: ${error}`,
-                content: { error: `Failed to ${lendContent.operation}` },
+            elizaLogger.error("Query failed:", error);
+            callback?.({
+                text: `Failed to run query: ${error}`,
+                content: { error: "Query failed" },
             });
             return false;
         }
@@ -141,86 +140,41 @@ export default {
         [
             {
                 user: "{{user1}}",
-                content: {
-                    text: "I want to supply 1 SUI to Navi",
-                },
+                content: { text: "What's my health factor on Navi?" },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "I'll help you supply 1 SUI to Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully supplied 1 SUI to Navi protocol",
+                    text: "🛡️ Your current health factor is 1.92",
+                    action: "GENERATE_QUERY",
                 },
             },
         ],
         [
             {
                 user: "{{user1}}",
-                content: {
-                    text: "Withdraw 0.5 SUI from Navi",
-                },
+                content: { text: "Show me what tokens I'm supplying." },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "I'll help you withdraw 0.5 SUI from Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully withdrew 0.5 SUI from Navi protocol",
+                    text: "💰 You are supplying:\n- 1.5 SUI\n- 200 USDC",
+                    action: "GENERATE_QUERY",
                 },
             },
         ],
         [
             {
                 user: "{{user1}}",
-                content: {
-                    text: "Borrow 100 USDC from Navi",
-                },
+                content: { text: "View portfolio summary" },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "I'll help you borrow 100 USDC from Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully borrowed 100 USDC from Navi protocol",
-                },
-            },
-        ],
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "Repay 50 USDC to Navi",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "I'll help you repay 50 USDC to Navi protocol...",
-                    action: "NAVI_LEND",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Successfully repaid 50 USDC to Navi protocol",
+                    text: "📊 Your portfolio summary:\n- Supplied: 1000 USDC\n- Borrowed: 500 USDC",
+                    action: "GENERATE_QUERY",
                 },
             },
         ],
     ] as ActionExample[][],
-} as Action; 
+} as Action;
