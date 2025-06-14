@@ -12,7 +12,7 @@ import {
     type Action,
 } from "@elizaos/core";
 import { z } from "zod";
-import { AuthService } from "../services/auth"; // <-- You define this
+import { AuthService } from "../services/auth";
 
 export interface LoginPayload extends Content {
     address: string;

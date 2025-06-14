@@ -11,7 +11,7 @@ import {
     generateObject,
     type Action,
 } from "@elizaos/core";
-import { NaviService } from "../services/navi";
+import { QueryService } from "../services/query";
 import { z } from "zod";
 
 export interface QueryPayload extends Content {
@@ -41,9 +41,9 @@ What is the user trying to query?`;
 
 export default {
     name: "GENERATE_QUERY",
-    description: "Query user portfolio, health factor, or lending positions",
+    description: "Generate a query to run on the Sandworm analytics engine",
     validate: async (runtime: IAgentRuntime, message: Memory) => {
-        elizaLogger.info("Validating query request...");
+        elizaLogger.info("Validating that the user wants to generate a query...");
         return true;
     },
 
@@ -56,7 +56,7 @@ export default {
     ): Promise<boolean> => {
         elizaLogger.info("Starting GENERATE_QUERY handler...");
 
-        const service = runtime.getService<NaviService>(ServiceType.TRANSCRIPTION);
+        const service = runtime.getService<QueryService>(ServiceType.TRANSCRIPTION);
 
         if (!state) {
             state = (await runtime.composeState(message)) as State;

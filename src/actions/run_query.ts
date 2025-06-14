@@ -37,7 +37,9 @@ Respond with a JSON markdown block containing the "query".`;
 export default {
     name: "RUN_QUERY",
     description: "Run analytical queries on the Sandworm blockchain data engine",
-    validate: async (_runtime, _message) => true,
+    validate: async (_runtime, _message) => {
+        return true;
+    },
 
     handler: async (
         runtime: IAgentRuntime,
