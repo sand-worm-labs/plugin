@@ -4,11 +4,8 @@ import {
     HandlerCallback,
     IAgentRuntime,
     Memory,
-    ModelClass,
     State,
-    composeContext,
     elizaLogger,
-    generateObject,
     type Action,
 } from "@elizaos/core";
 import { ChartService } from "../services/chart";
@@ -66,7 +63,7 @@ export default {
         [
             {
                 user: "{{user1}}",
-                content: { text: "Show me my SUI supply chart over time." },
+                content: { text: "Crate a bar chart of SUI supply history for every mouth over the last year." },
             },
             {
                 user: "{{user2}}",
@@ -92,15 +89,15 @@ export default {
         [
             {
                 user: "{{user1}}",
-                content: { text: "Plot my health factor trend" },
+                content: { text: "Create a pie chart for the 10 top token holders." },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "🛡️ Health factor over time:",
+                    text: "Here's the top token holders pie chart:",
                     action: "GENERATE_CHART",
                 },
             },
         ],
-    ] as ActionExample[][],
+    ] as unknown as ActionExample[][],
 } as Action;

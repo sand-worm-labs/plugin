@@ -4,38 +4,35 @@ import {
     HandlerCallback,
     IAgentRuntime,
     Memory,
-    ModelClass,
     State,
-    ServiceType,
-    composeContext,
     elizaLogger,
-    generateObject,
     type Action,
 } from "@elizaos/core";
-
+import { QueryService } from "../services/query"; // you must implement saveQuery here
 import { z } from "zod";
 
-export interface SandwormQueryPayload extends Content {
+const SaveQuerySchema = z.object({
+    title: z.string(),
+    query: z.string(),
+});
+
+export interface SaveQueryPayload extends Content {
+    title: string;
     query: string;
 }
 
-const queryTemplate = `Respond with a JSON markdown block containing only the extracted values. Use null if you can't extract the query.
-
-{{recentMessages}}
-
-Given the recent messages, extract the raw SQL or pseudo-SQL query the user wants to run on the Sandworm analytics engine.
-
-Respond with:
-\`\`\`json
-{
-  "query": "SELECT * FROM swaps WHERE token_symbol = 'SUI' AND timestamp >= NOW() - INTERVAL '1 day'"
-}
-\`\`\``;
-
 export default {
-    name: "SANDWORM_QUERY",
-    description: "Run analytics queries against Sandworm data engine",
-    validate: async (_runtime, _message) => true,
+    name: "SAVE_QUERY",
+    description: "Save a user query for later use",
+    validate: async (runtime: IAgentRuntime, message: Memory) => {
+        const { text } = message.content;
+        return (
+            text?.toLowerCase().includes("save this query") ||
+            text?.toLowerCase().includes("store query") ||
+            text?.toLowerCase().includes("bookmark query")
+        );
+    },
+
     handler: async (
         runtime: IAgentRuntime,
         message: Memory,
@@ -43,48 +40,39 @@ export default {
         _options: { [key: string]: unknown },
         callback?: HandlerCallback
     ): Promise<boolean> => {
-        elizaLogger.log("SANDWORM_QUERY handler started");
-
-        const schema = z.object({
-            query: z.string(),
-        });
-
-        const ctx = composeContext({
-            state: await runtime.composeState(message),
-            template: queryTemplate,
-        });
-
-        const content = await generateObject({
-            runtime,
-            context: ctx,
-            schema,
-            modelClass: ModelClass.SMALL,
-        });
-
-        const queryPayload = content.object as SandwormQueryPayload;
-        elizaLogger.info("User query extracted:", queryPayload.query);
+        elizaLogger.info("Running SAVE_QUERY handler...");
 
         try {
-            // Send query to your Sandworm backend
-            const response = await fetch("https://your-sandworm-api/query", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: queryPayload.query }),
-            });
+            const content = message.content as Partial<SaveQueryPayload>;
 
-            const result = await response.json();
+            if (!content.title || !content.query) {
+                callback?.({
+                    text: "Missing query or title. Please provide both a query and a name for it.",
+                    content: { error: "Missing data" },
+                });
+                return false;
+            }
+
+            SaveQuerySchema.parse(content); // validate types
+
+            // // Save to database or wherever
+            // await QueryService.saveQuery({
+            //     userId: state.user.id, // or however you store user IDs
+            //     title: content.title,
+            //     query: content.query,
+            // });
 
             callback?.({
-                text: `Query executed successfully:\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``,
-                content: queryPayload,
+                text: `✅ Query titled "${content.title}" has been saved.`,
+                content: { success: true },
             });
 
             return true;
-        } catch (err) {
-            elizaLogger.error("Query failed:", err);
+        } catch (error) {
+            elizaLogger.error("Error saving query:", error);
             callback?.({
-                text: `Failed to execute query: ${err}`,
-                content: { error: err },
+                text: `❌ Failed to save query: ${error}`,
+                content: { error: "Save failed" },
             });
             return false;
         }
@@ -94,21 +82,28 @@ export default {
         [
             {
                 user: "{{user1}}",
+                content: { text: "Save this query as 'Top Pools'" },
+            },
+            {
+                user: "{{user2}}",
                 content: {
-                    text: "Show me the top 5 pools on Base by volume this week",
+                    text: `✅ Query titled "Top Pools" has been saved.`,
+                    action: "SAVE_QUERY",
+                },
+            },
+        ],
+        [
+            {
+                user: "{{user1}}",
+                content: {
+                    text: "Store this query as 'Vitalik Portfolio View'",
                 },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "Running your query...",
-                    action: "SANDWORM_QUERY",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Here are the top 5 pools on Base by volume this week:\n\n```json\n[...results...]\n```",
+                    text: `✅ Query titled "Vitalik Portfolio View" has been saved.`,
+                    action: "SAVE_QUERY",
                 },
             },
         ],

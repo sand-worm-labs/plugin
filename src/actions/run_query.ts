@@ -4,27 +4,23 @@ import {
     HandlerCallback,
     IAgentRuntime,
     Memory,
-    ModelClass,
     State,
-    composeContext,
     elizaLogger,
-    generateObject,
     type Action,
 } from "@elizaos/core";
 import { z } from "zod";
 
-// Define the query payload structure
+
 export interface QueryPayload extends Content {
     query: string;
 }
 
-// Template to extract the SQL or pseudo-SQL query from conversation
 const queryTemplate = `Respond with a JSON markdown block containing only the extracted values.
 
 Example:
 \`\`\`json
 {
-    "query": "SELECT * FROM swaps WHERE token_symbol = 'SUI' AND timestamp >= NOW() - INTERVAL '1 day'"
+  "query": "SELECT * FROM swaps WHERE token_symbol = 'SUI' AND timestamp >= NOW() - INTERVAL '1 day'"
 }
 \`\`\`
 
@@ -38,6 +34,7 @@ export default {
     name: "RUN_QUERY",
     description: "Run analytical queries on the Sandworm blockchain data engine",
     validate: async (_runtime, _message) => {
+        elizaLogger.info("Validating that the user wants to run a query...");
         return true;
     },
 
@@ -48,55 +45,30 @@ export default {
         _options: { [key: string]: unknown },
         callback?: HandlerCallback
     ): Promise<boolean> => {
-        elizaLogger.log("Starting RUN_QUERY handler...");
-
-        // Compose context for extracting the query
-        if (!state) {
-            state = (await runtime.composeState(message)) as State;
-        } else {
-            state = await runtime.updateRecentMessageState(state);
-        }
-
-        const querySchema = z.object({
-            query: z.string().min(5), // Basic safeguard
-        });
-
-        const queryContext = composeContext({
-            state,
-            template: queryTemplate,
-        });
-
-        const content = await generateObject({
-            runtime,
-            context: queryContext,
-            schema: querySchema,
-            modelClass: ModelClass.SMALL,
-        });
-
-        const queryContent = content.object as QueryPayload;
-        elizaLogger.info("User query extracted:", queryContent.query);
+        elizaLogger.info("Starting RUN_QUERY handler...");
 
         try {
-            const response = await fetch("https://api.sandworm.dev/query", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: queryContent.query }),
-            });
+           // elizaLogger.info("Extracted query:", query);
 
-            const result = await response.json();
+            // const response = await fetch("https://api.sandworm.dev/query", {
+            //     method: "POST",
+            //     headers: { "Content-Type": "application/json" },
+            //     body: JSON.stringify({ query }),
+            // });
 
-            // Send result back to user
-            callback?.({
-                text: `Query successful:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``,
-                content: result,
-            });
+            // const result = await response.json();
+
+            // callback?.({
+            //     text: `✅ Query successful:\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``,
+            //     content: result,
+            // });
 
             return true;
         } catch (error) {
-            elizaLogger.error("Error running Sandworm query:", error);
+            elizaLogger.error("Error running query:", error);
             callback?.({
-                text: `Query failed: ${error}`,
-                content: { error: "Failed to run query" },
+                text: `❌ Query failed: ${error}`,
+                content: { error: "Query execution failed" },
             });
             return false;
         }
@@ -124,5 +96,5 @@ export default {
                 },
             },
         ],
-    ] as ActionExample[][],
+    ] as unknown as ActionExample[][],
 } as Action;
