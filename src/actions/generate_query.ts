@@ -4,11 +4,8 @@ import {
     HandlerCallback,
     IAgentRuntime,
     Memory,
-    ModelClass,
     State,
-    composeContext,
     elizaLogger,
-    generateObject,
     type Action,
 } from "@elizaos/core";
 import { QueryService } from "../services/query";
@@ -83,31 +80,38 @@ export default {
         }
     },
 
-    examples: [
+    examples:[
         [
             {
-                user: "{{user1}}",
-                content: { text: "What's my health factor on Navi?" },
+            user: "{{user1}}",
+            content: { text: "Select vitalik.eth on base and ethereum" },
             },
             {
-                user: "{{user2}}",
-                content: {
-                    text: "🛡️ Your current health factor is 1.92",
-                    action: "GENERATE_QUERY",
-                },
+            user: "{{user2}}",
+            content: {
+                text: "```sql\nSELECT balance, chain FROM account vitalik.eth ON eth, base\n```",
+                action: "GENERATE_QUERY",
+            },
             },
         ],
         [
             {
-                user: "{{user1}}",
-                content: { text: "Show me what tokens I'm supplying." },
+            user: "{{user1}}",
+            content: { text: "Find the top 10 Cetus pools by swap count on May 22, 2025" },
             },
             {
-                user: "{{user2}}",
-                content: {
-                    text: "💰 You are supplying:\n- 1.5 SUI\n- 200 USDC",
-                    action: "GENERATE_QUERY",
-                },
+            user: "{{user2}}",
+            content: {
+                text: `\`\`\`sql
+                    SELECT pool, COUNT(*) AS swap_count
+                    FROM cetus_swaps
+                    WHERE TO_TIMESTAMP(timestampMs / 1000)::DATE = '2025-05-22'
+                    GROUP BY pool
+                    ORDER BY swap_count DESC
+                    LIMIT 10;
+                    \`\`\``,
+                action: "GENERATE_QUERY",
+            },
             },
         ],
         [
@@ -116,12 +120,20 @@ export default {
                 content: { text: "View portfolio summary" },
             },
             {
-                user: "{{user2}}",
-                content: {
-                    text: "📊 Your portfolio summary:\n- Supplied: 1000 USDC\n- Borrowed: 500 USDC",
-                    action: "GENERATE_QUERY",
-                },
+            user: "{{user2}}",
+            content: {
+                text: `\`\`\`sql
+                    SELECT token_symbol,
+                    SUM(CASE WHEN action = 'supply' THEN amount ELSE 0 END) AS total_supplied,
+                    SUM(CASE WHEN action = 'borrow' THEN amount ELSE 0 END) AS total_borrowed,
+                    SUM(CASE WHEN action = 'wallet' THEN amount ELSE 0 END) AS wallet_balance
+                    FROM positions
+                    WHERE user_address = '0x...'
+                    GROUP BY token_symbol;
+                    \`\`\``,
+                action: "GENERATE_QUERY",
+            },
             },
         ],
-    ] as ActionExample[][],
+        ] as unknown as ActionExample[][]
 } as Action;
