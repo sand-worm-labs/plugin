@@ -13,7 +13,7 @@ export class QueryService extends Service {
     capabilityDescription: string ="This is the query service for sandworm.";
     static serviceType = ServiceType.TRANSCRIPTION;
 
-     initialize(runtime: IAgentRuntime): Promise<void> {
+    initialize(runtime: IAgentRuntime): Promise<void> {
       return null;
     }
 }

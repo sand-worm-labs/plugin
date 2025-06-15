@@ -60,3 +60,4 @@ cypress/downloads/
 /.elizadb
 dist
 bun.lock
+/.elizadb-test

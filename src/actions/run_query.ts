@@ -33,9 +33,19 @@ Respond with a JSON markdown block containing the "query".`;
 export default {
     name: "RUN_QUERY",
     description: "Run analytical queries on the Sandworm blockchain data engine",
-    validate: async (_runtime, _message) => {
+    validate: async (runtime: IAgentRuntime, message: Memory) => {
         elizaLogger.info("Validating that the user wants to run a query...");
-        return true;
+        const { text } = message.content;
+        return (
+            text?.toLowerCase().includes("run query") ||
+            text?.toLowerCase().includes("execute query") ||
+            text?.toLowerCase().includes("get result") ||
+            text?.toLowerCase().includes("fetch data") ||
+            text?.toLowerCase().includes("show me") ||
+            text?.toLowerCase().includes("query this") ||
+            text?.toLowerCase().startsWith("select ")  // basic SQL query signal
+        );
+
     },
 
     handler: async (
