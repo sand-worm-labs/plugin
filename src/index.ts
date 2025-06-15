@@ -14,21 +14,16 @@ import { QueryService } from "./services/query.ts";
 // export { WalletProvider, generateChart };
 
 export const sandwormPlugin: Plugin = {
-    name: "sandworm",
-    description: "Core Sandworm plugin for blockchain analytics",
+  name: "sandworm",
+  description: "Core Sandworm plugin for blockchain analytics",
 
-    actions: [
-        generateChart,
-        generateQuery,
-        saveQuery,
-        runQuery,
-    ],
+  actions: [generateChart, generateQuery, saveQuery, runQuery],
 
-    providers: [],
+  providers: [],
 
-    services: [],
+  services: [],
 
-    evaluators: [],
+  evaluators: [],
 };
 
 export default sandwormPlugin;
