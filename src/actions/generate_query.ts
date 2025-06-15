@@ -55,75 +55,22 @@ export default {
         callback?: HandlerCallback
     ): Promise<boolean> => {
         elizaLogger.info("Starting GENERATE_QUERY handler...");
+        //elizaLogger.info("Query content extracted:", queryContent);
 
-        const service = runtime.getService<QueryService>(ServiceType.TRANSCRIPTION);
-
-        if (!state) {
-            state = (await runtime.composeState(message)) as State;
-        } else {
-            state = await runtime.updateRecentMessageState(state);
-        }
-
-        const querySchema = z.object({
-            query_type: z.enum([
-                "portfolio",
-                "health_factor",
-                "supply_positions",
-                "borrow_positions",
-            ]).nullable(),
-        });
-
-        const queryContext = composeContext({
-            state,
-            template: queryTemplate,
-        });
-
-        const content = await generateObject({
-            runtime,
-            context: queryContext,
-            schema: querySchema,
-            modelClass: ModelClass.SMALL,
-        });
-
-        const queryContent = content.object as QueryPayload;
-        elizaLogger.info("Query content extracted:", queryContent);
-
-        if (!queryContent.query_type) {
-            callback?.({
-                text: "Sorry, I couldn't understand your query. Please ask about your portfolio, health factor, or token positions.",
-                content: { error: "Unknown query type" },
-            });
-            return false;
-        }
+        // if (!queryContent.query_type) {
+        //     callback?.({
+        //         text: "Sorry, I couldn't understand your query. Please ask about your portfolio, health factor, or token positions.",
+        //         content: { error: "Unknown query type" },
+        //     });
+        //     return false;
+        // }
 
         try {
-            const address = service.getAddress();
-            let responseText = "";
-            let result;
 
-            switch (queryContent.query_type) {
-                case "portfolio":
-                    result = await service.getPortfolio(address);
-                    responseText = `📊 Your portfolio summary:\n${JSON.stringify(result, null, 2)}`;
-                    break;
-                case "health_factor":
-                    result = await service.getHealthFactor(address);
-                    responseText = `🛡️ Your current health factor is **${result}**.`;
-                    break;
-                case "supply_positions":
-                    result = await service.getSupplyPositions(address);
-                    responseText = `💰 You are supplying:\n${JSON.stringify(result, null, 2)}`;
-                    break;
-                case "borrow_positions":
-                    result = await service.getBorrowPositions(address);
-                    responseText = `💸 You have borrowed:\n${JSON.stringify(result, null, 2)}`;
-                    break;
-            }
-
-            callback?.({
-                text: responseText,
-                content: { query: queryContent.query_type, result },
-            });
+            // callback?.({
+            //     text: responseText,
+            //     content: { query: queryContent.query_type, result },
+            // });
 
             return true;
         } catch (error) {
